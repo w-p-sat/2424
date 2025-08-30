@@ -1022,8 +1022,8 @@
 
 
 
+// script.js
 
-// Цей код запускається, коли вся HTML-структура сторінки завантажена.
 document.addEventListener('DOMContentLoaded', () => {
 
     const games = [
@@ -1044,38 +1044,46 @@ document.addEventListener('DOMContentLoaded', () => {
         return x - Math.floor(x);
     }
 
-    function getTimeSeed(interval = 5000) {
-        return Math.floor(Date.now() / interval);
-    }
-
     function getRandomPhase(gameIndex, gameId) {
         const seed = gameIndex + gameSeeds[gameId];
         const isGreen = seededRandom(seed) < 0.5;
         if (isGreen) {
-            return { type: 'normal', color: '#00c107', duration: Math.floor(seededRandom(seed + 1) * 600) + 180, minRTP: 60, maxRTP: 95 };
+            return {
+                type: 'normal',
+                color: '#00c107',
+                duration: Math.floor(seededRandom(seed + 1) * 600) + 180,
+                minRTP: 60,
+                maxRTP: 95
+            };
         } else {
-            return { type: 'normal', color: '#ff6666', duration: Math.floor(seededRandom(seed + 2) * 600) + 120, minRTP: 10, maxRTP: 45 };
+            return {
+                type: 'normal',
+                color: '#ff6666',
+                duration: Math.floor(seededRandom(seed + 2) * 600) + 120,
+                minRTP: 10,
+                maxRTP: 45
+            };
         }
     }
 
-    // --- Генерація початкових точок графіка ---
-    function generatePricePoints(gameId) {
-        const maxPoints = 50;
-        const seed = gameSeeds[gameId];
-        const savedPrices = localStorage.getItem(`prices_${gameId}`);
-        if (savedPrices) return JSON.parse(savedPrices);
-        let prices = [];
-        let lastPrice = 50;
-        for (let i = 0; i < maxPoints; i++) {
-            const volatilityFactor = seededRandom(seed + i) * 10 - 5;
-            lastPrice = Math.max(20, Math.min(95, lastPrice + volatilityFactor));
-            prices.push(lastPrice);
-        }
-        return prices;
+    function formatCurrency(amount) {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: 'USD',
+            minimumFractionDigits: 0
+        }).format(amount);
     }
 
+    function transitionToNextPhase(gameId, gameIndex) {
+        const state = states[gameId];
+        state.currentPhase = getRandomPhase(gameIndex, gameId);
+        state.phaseStartTime = Date.now();
+    }
+
+    // --- Ініціалізація станів ---
     games.forEach((game, gameIndex) => {
         states[game.id] = {
+            prices: [],
             maxPoints: 50,
             currentPhase: getRandomPhase(gameIndex, game.id),
             phaseStartTime: Date.now(),
@@ -1084,10 +1092,10 @@ document.addEventListener('DOMContentLoaded', () => {
             lastBigWinTime: '--',
             activePlayersValue: 0,
             lastJackpotTime: formatCurrency(Math.floor(Math.random() * (200000 - 50000 + 1)) + 50000),
-            lastJackpotUpdate: Date.now(),
-            prices: generatePricePoints(game.id)
+            lastJackpotUpdate: Date.now()
         };
 
+        // --- Підключення модальних вікон ---
         modals[game.id] = {
             currentRTPElement: document.getElementById(`modal_currentRTP_${game.id}`),
             averageRTPElement: document.getElementById(`modal_averageRTP_${game.id}`),
@@ -1110,28 +1118,52 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         const closeBtn = modals[game.id].modalElement.querySelector('.close-button');
-        closeBtn.addEventListener('click', () => { modals[game.id].modalElement.style.display = 'none'; });
+        closeBtn.addEventListener('click', () => {
+            modals[game.id].modalElement.style.display = 'none';
+        });
+
         modals[game.id].modalElement.addEventListener('click', (e) => {
-            if (e.target === modals[game.id].modalElement) modals[game.id].modalElement.style.display = 'none';
+            if (e.target === modals[game.id].modalElement) {
+                modals[game.id].modalElement.style.display = 'none';
+            }
         });
     });
 
-    function formatCurrency(amount) {
-        return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(amount);
+    // --- Функція синхронізації графіка з сервером ---
+    async function fetchServerData(gameId) {
+        try {
+            const res = await fetch(`/api/prices/${gameId}`);
+            if (!res.ok) throw new Error("Server fetch error");
+            const data = await res.json();
+            states[gameId].prices = data.prices;
+            states[gameId].phaseStartTime = data.phaseStartTime;
+            states[gameId].currentPhase = data.currentPhase;
+        } catch(e) {
+            console.error(e);
+        }
     }
 
-    function transitionToNextPhase(gameId, gameIndex) {
-        const state = states[gameId];
-        state.currentPhase = getRandomPhase(gameIndex, gameId);
-        state.phaseStartTime = Date.now();
+    async function sendServerData(gameId) {
+        try {
+            await fetch(`/api/prices/${gameId}`, {
+                method: 'POST',
+                headers: {'Content-Type':'application/json'},
+                body: JSON.stringify({
+                    prices: states[gameId].prices,
+                    currentPhase: states[gameId].currentPhase,
+                    phaseStartTime: states[gameId].phaseStartTime
+                })
+            });
+        } catch(e) { console.error(e); }
     }
 
+    // --- Малювання графіка ---
     function drawChart(gameId) {
         const canvas = document.getElementById(`tradingChart_${gameId}`);
         if (!canvas) return;
         const ctx = canvas.getContext('2d');
-        let width = canvas.clientWidth;
-        let height = canvas.clientHeight;
+        const width = canvas.clientWidth;
+        const height = canvas.clientHeight;
         const Dpr = window.devicePixelRatio || 1;
         canvas.width = Math.max(1, Math.floor(width * Dpr));
         canvas.height = Math.max(1, Math.floor(height * Dpr));
@@ -1139,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.scale(Dpr,Dpr);
 
         const state = states[gameId];
-        if (state.prices.length === 0) return;
+        if (!state.prices.length) return;
 
         const minRTP = Math.min(...state.prices);
         const maxRTP = Math.max(...state.prices);
@@ -1149,8 +1181,45 @@ document.addEventListener('DOMContentLoaded', () => {
         const yRange = (yMaxDynamic - yMinDynamic) || 1;
 
         ctx.clearRect(0,0,width,height);
+        ctx.strokeStyle = 'rgba(0,255,247,0.2)';
+        ctx.lineWidth = 0.5;
 
-        const xStep = width / (state.maxPoints - 1);
+        const gridXStep = width / 10;
+        const gridYStep = height / 5;
+        for (let i=1;i<10;i++){
+            ctx.beginPath();
+            ctx.moveTo(i*gridXStep,0);
+            ctx.lineTo(i*gridXStep,height);
+            ctx.stroke();
+        }
+        for (let i=1;i<5;i++){
+            ctx.beginPath();
+            ctx.moveTo(0,i*gridYStep);
+            ctx.lineTo(width,i*gridYStep);
+            ctx.stroke();
+        }
+
+        ctx.strokeStyle = '#959595ff';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(5,0);
+        ctx.lineTo(5,height);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(0,height-5);
+        ctx.lineTo(width,height-5);
+        ctx.stroke();
+
+        ctx.fillStyle = '#00ffffff';
+        ctx.font = `10px sans-serif`;
+        ctx.textAlign = 'left';
+        const yLabels = [yMinDynamic, yMinDynamic + yRange*0.25, yMinDynamic + yRange*0.5, yMinDynamic + yRange*0.75, yMaxDynamic];
+        yLabels.forEach(label => {
+            const y = height - ((label - yMinDynamic)/yRange)*height;
+            ctx.fillText(label.toFixed(0),10,y);
+        });
+
+        const xStep = width/(state.maxPoints-1);
         const gradient = ctx.createLinearGradient(0,0,0,height);
         const topShadowColor = (state.prices[state.prices.length-1]>=50)?'rgba(0,255,183,0.78)':'rgba(255,0,0,0.75)';
         gradient.addColorStop(0,topShadowColor);
@@ -1194,39 +1263,77 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.font = `bold 13px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
-        let textX = lastX; if (textX<20) textX=20; if (textX>width-20) textX=width-20;
-        let textY = lastY - 8; if (textY<20) textY=20;
+        let textX = lastX;
+        let textY = lastY - 8;
+        if (textX<20) textX=20;
+        if (textX>width-20) textX=width-20;
+        if (textY<20) textY=20;
         ctx.fillText(`${state.prices[state.prices.length-1].toFixed(1)}%`,textX,textY);
     }
 
-    function updateData(gameId, gameIndex) {
+    // --- Оновлення даних гри ---
+    async function updateData(gameId, gameIndex) {
         const state = states[gameId];
         const now = Date.now();
 
-        const elapsedTime = (now - state.phaseStartTime)/1000;
-        if (elapsedTime >= state.currentPhase.duration) transitionToNextPhase(gameId, gameIndex);
+        // --- Синхронізація з сервером ---
+        await fetchServerData(gameId);
 
-        const lastPrice = state.prices[state.prices.length-1];
+        const elapsedTime = (now - state.phaseStartTime)/1000;
+        if (elapsedTime >= state.currentPhase.duration) {
+            transitionToNextPhase(gameId, gameIndex);
+        }
+
+        const lastPrice = state.prices.length>0?state.prices[state.prices.length-1]:50;
         let minRTP,maxRTP;
-        if (state.currentPhase.color === '#00c107'){ minRTP = 50; maxRTP = state.currentPhase.maxRTP; }
-        else { minRTP = state.currentPhase.minRTP; maxRTP = 49.99; }
+        if (state.currentPhase.color === '#00c107'){
+            minRTP = 50;
+            maxRTP = state.currentPhase.maxRTP;
+        } else {
+            minRTP = state.currentPhase.minRTP;
+            maxRTP = 49.99;
+        }
 
         const range = maxRTP - minRTP;
-        const seed = gameSeeds[gameId] + Math.floor(now/5000);
-        const volatilityFactor = seededRandom(seed) * range - (range/2);
+        const seed = gameSeeds[gameId] + gameIndex * 1000;
+        const volatilityFactor = seededRandom(seed) * range - (range/2); 
         const newPrice = lastPrice + volatilityFactor;
-        const clampedPrice = Math.max(minRTP, Math.min(maxRTP, newPrice));
+        const clampedPrice = Math.max(minRTP,Math.min(maxRTP,newPrice));
         state.prices.push(clampedPrice);
-        if (state.prices.length > state.maxPoints) state.prices.shift();
+        if (state.prices.length>state.maxPoints) state.prices.shift();
 
-        localStorage.setItem(`prices_${gameId}`, JSON.stringify(state.prices));
+        await sendServerData(gameId);
 
         drawChart(gameId);
+
+        const container = document.getElementById(`tradingChart_${gameId}`).closest('.slot-item');
+        const currentRTPElement = container.querySelector('.currentRTP');
+        const averageRTPElement = container.querySelector('.averageRTP');
+        const volatilityElement = container.querySelector('.volatility');
+
+        const totalRTP = state.prices.reduce((sum,p)=>sum+p,0);
+        const averageRTP = totalRTP/state.prices.length;
+        const rtpRange = Math.max(...state.prices)-Math.min(...state.prices);
+
+        let volatilityText;
+        if (rtpRange>50) volatilityText='Критична';
+        else if (rtpRange>25) volatilityText='Висока';
+        else if (rtpRange>10) volatilityText='Середня';
+        else volatilityText='Низька';
+
+        currentRTPElement.textContent = `${state.prices[state.prices.length-1].toFixed(2)}%`;
+        averageRTPElement.textContent = `${averageRTP.toFixed(2)}%`;
+        volatilityElement.textContent = volatilityText;
+
+        if (modals[gameId].modalElement.style.display === 'block') {
+            updateModalData(gameId);
+        }
     }
 
-    function updateModalData(gameId) {
+    function updateModalData(gameId){
         const state = states[gameId];
         const modal = modals[gameId];
+
         const currentRTP = state.prices[state.prices.length-1];
         const averageRTP = state.prices.reduce((sum,p)=>sum+p,0)/state.prices.length;
         const rtpRange = Math.max(...state.prices)-Math.min(...state.prices);
@@ -1240,6 +1347,12 @@ document.addEventListener('DOMContentLoaded', () => {
         modal.currentRTPElement.textContent = `${currentRTP.toFixed(2)}%`;
         modal.averageRTPElement.textContent = `${averageRTP.toFixed(2)}%`;
         modal.volatilityElement.textContent = volatilityText;
+        modal.lastBigWinElement.textContent = state.lastBigWinTime;
+        modal.booksFrequencyElement.textContent = `${(Math.random()*(25-5)+5).toFixed(1)}%`;
+        modal.longestStreakElement.textContent = state.longestStreakValue;
+        modal.bonusProbabilityElement.textContent = `${state.bonusProbabilityValue.toFixed(1)}%`;
+        modal.activePlayersElement.textContent = state.activePlayersValue;
+        modal.lastJackpotTimeElement.textContent = state.lastJackpotTime;
     }
 
     games.forEach((game, index) => {
@@ -1248,6 +1361,3 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 });
-
-
-
