@@ -373,7 +373,6 @@
 
 
 
-
 // Цей код запускається, коли вся HTML-структура сторінки завантажена.
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -444,20 +443,18 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         // Генеруємо стартовий масив точок для графіка
-// Перевіряємо, чи є збережені ціни у localStorage
-const savedPrices = localStorage.getItem(`prices_${game.id}`);
-if (savedPrices) {
-    states[game.id].prices = JSON.parse(savedPrices);
-} else {
-    let lastPrice = 50;
-    for (let i = 0; i < states[game.id].maxPoints; i++) {
-        const seed = gameIndex * 1000 + i; // фіксований seed
-        let volatilityFactor = seededRandom(seed) * 10 - 5; // ±5%
-        lastPrice = Math.max(20, Math.min(95, lastPrice + volatilityFactor));
-        states[game.id].prices.push(lastPrice);
-    }
-}
-
+        const savedPrices = localStorage.getItem(`prices_${game.id}`);
+        if (savedPrices) {
+            states[game.id].prices = JSON.parse(savedPrices);
+        } else {
+            let lastPrice = 50;
+            for (let i = 0; i < states[game.id].maxPoints; i++) {
+                const seed = gameIndex * 1000 + i;
+                let volatilityFactor = seededRandom(seed) * 10 - 5;
+                lastPrice = Math.max(20, Math.min(95, lastPrice + volatilityFactor));
+                states[game.id].prices.push(lastPrice);
+            }
+        }
 
         // Підключаємо елементи модальних вікон
         modals[game.id] = {
@@ -656,10 +653,11 @@ if (savedPrices) {
         const volatilityFactor = seededRandom(seed) * range - (range/2); 
         const newPrice = lastPrice + volatilityFactor;
         const clampedPrice = Math.max(minRTP,Math.min(maxRTP,newPrice));
-        // Зберігаємо поточний стан графіка
-localStorage.setItem(`prices_${gameId}`, JSON.stringify(state.prices));
 
+        // Додаємо нову точку, обрізаємо масив, і тільки потім зберігаємо
+        state.prices.push(clampedPrice);
         if (state.prices.length>state.maxPoints) state.prices.shift();
+        localStorage.setItem(`prices_${gameId}`, JSON.stringify(state.prices));
 
         // Оновлення бонусів
         if (state.currentPhase.color === '#00c107') {
@@ -1014,5 +1012,6 @@ localStorage.setItem(`prices_${gameId}`, JSON.stringify(state.prices));
 //     });
 
 // });
+
 
 
