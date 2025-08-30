@@ -656,7 +656,9 @@ if (savedPrices) {
         const volatilityFactor = seededRandom(seed) * range - (range/2); 
         const newPrice = lastPrice + volatilityFactor;
         const clampedPrice = Math.max(minRTP,Math.min(maxRTP,newPrice));
-        state.prices.push(clampedPrice);
+        // Зберігаємо поточний стан графіка
+localStorage.setItem(`prices_${gameId}`, JSON.stringify(state.prices));
+
         if (state.prices.length>state.maxPoints) state.prices.shift();
 
         // Оновлення бонусів
@@ -1012,4 +1014,5 @@ if (savedPrices) {
 //     });
 
 // });
+
 
